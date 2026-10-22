@@ -24,6 +24,10 @@ patches without rereading their group_vars.
   `log-opts` are kept when the driver was already `json-file`, and dropped otherwise, because
   dockerd will not start with options `json-file` does not know. A file that is not a JSON object
   now stops the role instead of being overwritten.
+- `harden` writes its kernel parameters to `/etc/sysctl.d/99-sre-server.conf` instead of
+  `/etc/sysctl.conf`, which Ubuntu 26.04 no longer reads at boot, so they were applied once and lost
+  on the next reboot: IPv6 came back on, with `rp_filter`, `log_martians` and `suid_dumpable` back
+  at their defaults.
 - `harden` no longer restarts fail2ban on every run. It ensures the service is enabled and running,
   and restarts it through a handler only when installing it changed something (#8).
 
