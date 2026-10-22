@@ -226,6 +226,36 @@
     - "'traefik' not in k3s_disable"
     - k3s_traefik_client_ca | length > 0
 
+# Traefik drops every TLSOption named default when there is more than one, and the requirement
+# would go with them without a word, so another one anywhere stops the role
+- name: Look for another default TLSOption
+  ansible.builtin.command: >-
+    k3s kubectl get tlsoptions.traefik.io --all-namespaces
+    --field-selector metadata.name=default,metadata.namespace!=kube-system
+    --output jsonpath={.items[*].metadata.namespace}
+  register: k3s_other_tls_defaults
+  until: k3s_other_tls_defaults.rc == 0
+  retries: 30
+  delay: 10
+  changed_when: false
+  when:
+    - "'traefik' not in k3s_disable"
+    - k3s_traefik_client_ca | length > 0
+    - not ansible_check_mode
+
+- name: Assert no other default TLSOption would cancel the requirement
+  ansible.builtin.assert:
+    that: k3s_other_tls_defaults.stdout | length == 0
+    fail_msg: >-
+      A TLSOption named default exists in {{ k3s_other_tls_defaults.stdout }}. Traefik drops every
+      default when there is more than one, so the client certificate requirement would not apply.
+      Remove or rename it.
+    quiet: true
+  when:
+    - "'traefik' not in k3s_disable"
+    - k3s_traefik_client_ca | length > 0
+    - not ansible_check_mode
+
 - name: Require client certificates on traefik
   ansible.builtin.command: k3s kubectl apply --filename /etc/rancher/k3s/traefik-client-auth.yaml
   register: k3s_client_auth_applied
@@ -241,7 +271,7 @@
 - name: Remove the client certificate requirement while it is off
   ansible.builtin.command: >-
     k3s kubectl --namespace kube-system delete --ignore-not-found
-    tlsoption.traefik.io/default secret/traefik-client-ca
+    --selector app.kubernetes.io/managed-by=sre.server.k3s tlsoptions.traefik.io,secrets
   register: k3s_client_auth_deleted
   changed_when: "'deleted' in k3s_client_auth_deleted.stdout"
   failed_when:

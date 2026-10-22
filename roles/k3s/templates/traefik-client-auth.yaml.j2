@@ -6,6 +6,8 @@ kind: Secret
 metadata:
   name: traefik-client-ca
   namespace: kube-system
+  labels:
+    app.kubernetes.io/managed-by: sre.server.k3s
 type: Opaque
 # data rather than stringData, which kubectl apply would report as changed on every run
 data:
@@ -16,6 +18,8 @@ kind: TLSOption
 metadata:
   name: default
   namespace: kube-system
+  labels:
+    app.kubernetes.io/managed-by: sre.server.k3s
 spec:
   minVersion: VersionTLS12
   clientAuth:
