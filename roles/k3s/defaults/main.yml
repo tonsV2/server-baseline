@@ -16,6 +16,15 @@ k3s_disable:
 # The host port traefik's websecure entrypoint binds when traefik is not disabled.
 k3s_traefik_https_port: 443
 
+# Addresses, single or CIDR, whose X-Forwarded-* headers traefik keeps on websecure instead of
+# replacing them with the connecting address: the ranges of a proxy in front, such as Cloudflare's.
+k3s_traefik_trusted_ips: [ ]
+
+# A CA certificate in PEM. When set, traefik refuses every TLS connection without a client
+# certificate it signed, so only a proxy holding one, such as Cloudflare with Authenticated Origin
+# Pulls, reaches anything behind it.
+k3s_traefik_client_ca: ""
+
 # Pod Security Admission level enforced on every namespace but kube-system, standing in for the
 # user namespace remapping Docker containers get from harden: privileged, host namespace and
 # hostPath pods are refused. Audit and warn report what restricted would refuse.
