@@ -1,0 +1,16 @@
+# New connections from the internet: the ports in firewall_allowed_ports and
+# firewall_allowed_udp_ports, ICMP and DHCP replies, and nothing else. Replies to connections the
+# host opened are established and pass.
+*mangle
+:PUBLIC-INGRESS - [0:0]
+-A PUBLIC-INGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+-A PUBLIC-INGRESS -p icmp -j RETURN
+-A PUBLIC-INGRESS -p udp --sport 67 --dport 68 -j RETURN
+{% for port in firewall_allowed_ports | default([]) %}
+-A PUBLIC-INGRESS -p tcp --dport {{ port }} -j RETURN
+{% endfor %}
+{% for port in firewall_allowed_udp_ports | default([]) %}
+-A PUBLIC-INGRESS -p udp --dport {{ port }} -j RETURN
+{% endfor %}
+-A PUBLIC-INGRESS -j DROP
+COMMIT

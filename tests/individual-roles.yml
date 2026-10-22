@@ -22,3 +22,10 @@
 
   roles:
     - sre.server.harden
+
+- name: K3s on its own
+  hosts: all
+  become: true
+
+  roles:
+    - sre.server.k3s

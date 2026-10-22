@@ -1,0 +1,15 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    service:
+      type: ClusterIP
+    ports:
+      web:
+        expose:
+          default: false
+      websecure:
+        hostPort: {{ k3s_traefik_https_port }}

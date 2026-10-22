@@ -1,0 +1,9 @@
+- name: Restart k3s
+  ansible.builtin.systemd_service:
+    name: k3s
+    state: restarted
+    daemon_reload: true
+
+- name: Save iptables rules
+  ansible.builtin.command: netfilter-persistent save
+  changed_when: true

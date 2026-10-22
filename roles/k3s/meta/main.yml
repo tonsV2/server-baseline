@@ -1,0 +1,16 @@
+galaxy_info:
+  author: tonsV2
+  description: A single node k3s server on a baselined host, alongside Docker.
+  license: Apache-2.0
+  min_ansible_version: '2.15'
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+        - resolute
+  galaxy_tags:
+    - k3s
+    - kubernetes
+    - firewall
+
+dependencies: [ ]

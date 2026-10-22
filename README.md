@@ -27,6 +27,7 @@ namespace, and the same applies.
 | `sre.server.firewall` | Default deny `DOCKER-USER` chain, allowing only the ports you list plus inter-container traffic, persisted with `netfilter-persistent` |
 | `sre.server.harden` | SSH, kernel, AppArmor, fail2ban and Docker daemon hardening, including user namespace remapping |
 | `sre.server.baseline` | All three of the above, in that order. No tasks of its own |
+| `sre.server.k3s` | A single node k3s server beside Docker, run after the baseline. Not part of `baseline` |
 
 The order matters: `bootstrap` installs the Docker Engine, `firewall` locks down the `DOCKER-USER`
 chain that installing it creates, and `harden` reconfigures the daemon and the host around both.
@@ -112,6 +113,12 @@ Every variable has a default. Override in `group_vars/all.yml`.
 | `allowed_ssh_users` | `[ ubuntu ]` | harden | SSH `AllowUsers`. `docker_user` is appended automatically |
 | `firewall_allowed_ports` | `[ 22, 80, 443 ]` | firewall | Host facing TCP ports |
 | `firewall_allowed_udp_ports` | `[ 51820 ]` | firewall | Host facing UDP ports. 51820 is WireGuard |
+| `k3s_version` | see defaults | k3s | k3s release to install, checked against the release's checksums |
+| `k3s_cluster_cidr`, `k3s_service_cidr` | `10.42.0.0/16`, `10.43.0.0/16` | k3s | Pod and Service ranges |
+| `k3s_disable` | `[ servicelb ]` | k3s | Packaged components not to deploy. Add `traefik` while something else holds 443 |
+| `k3s_traefik_https_port` | `443` | k3s | Host port traefik's websecure entrypoint binds |
+| `k3s_pod_security_level` | `baseline` | k3s | Pod Security Admission level enforced outside `kube-system` |
+| `k3s_public_interface` | default route's interface | k3s | New connections arriving here are dropped unless their port is in the firewall's lists |
 
 Operators are deliberately **not** added to the root equivalent `docker` group. Give them a scoped
 `sudo` rule for the command they need instead.
@@ -155,6 +162,32 @@ builds the collection and attaches the tarball to a GitHub release.
 - **The SSH tasks validate with `sshd -t`**, which needs `/run/sshd` to exist. Every booted host has
   it, but a container or a chroot where sshd has never started does not, and the play fails there
   rather than writing a config it could not check.
+
+## k3s beside Docker
+
+`sre.server.k3s` installs a single node k3s server on a host the baseline has already set up, and
+leaves Docker in place. Run it after the baseline in the same play. Kubeconfig is
+`/etc/rancher/k3s/k3s.yaml`, readable by root only; reach the API from elsewhere through an ssh
+tunnel to `127.0.0.1:6443`.
+
+What it does about the baseline, which was written for Docker alone:
+
+- **k3s gets around `DOCKER-USER`.** Its network policy controller accepts forwarded traffic ahead
+  of Docker's jump, so a hostPort or NodePort would be public whatever `firewall_allowed_ports`
+  says, and `INPUT` is open anyway (dhis2-sre/server-baseline#17). The role filters new connections
+  on `k3s_public_interface` in `mangle PREROUTING`, before any port is rewritten, so the firewall's
+  port lists decide what reaches host services, containers and pods alike. It refuses to run when
+  the SSH port it connects over is not in `firewall_allowed_ports`.
+- **`DOCKER-USER` drops pod traffic** when Docker's jump comes first, as it does after Docker
+  restarts. The role lets traffic from and to the pod range through it.
+- **`netfilter-persistent` saves k3s's rules**, which refer to ipsets that do not exist at boot, so
+  restoring them fails and takes the whole filter table, the firewall's rules included, with it. A
+  `netfilter-persistent` plugin takes them back out of `rules.v4` on every save; k3s writes them
+  again when it starts.
+- **Flannel uses `host-gw`**, which opens no VXLAN port.
+- **User namespace remapping and `icc` are Docker's.** Pods get Pod Security Admission instead, at
+  `k3s_pod_security_level`. Charts that need a hostPort, host namespaces or hostPath go in
+  `kube-system`, which is exempt.
 
 ## Development
 
