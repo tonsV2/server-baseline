@@ -175,15 +175,18 @@ What it does about the baseline, which was written for Docker alone:
 - **k3s gets around `DOCKER-USER`.** Its network policy controller accepts forwarded traffic ahead
   of Docker's jump, so a hostPort or NodePort would be public whatever `firewall_allowed_ports`
   says, and `INPUT` is open anyway (dhis2-sre/server-baseline#17). The role filters new connections
-  on `k3s_public_interface` in `mangle PREROUTING`, before any port is rewritten, so the firewall's
-  port lists decide what reaches host services, containers and pods alike. It refuses to run when
-  the SSH port it connects over is not in `firewall_allowed_ports`.
+  on `k3s_public_interface` in `mangle PREROUTING`, for IPv4 and IPv6, before any port is rewritten:
+  only connections to the host's own addresses on the listed ports pass, so the firewall's port
+  lists decide what reaches host services, containers and pods alike, and a neighbour on the same
+  link cannot route into the pod or Service ranges. It refuses to run when the SSH port it connects
+  over is not in `firewall_allowed_ports`.
 - **`DOCKER-USER` drops pod traffic** when Docker's jump comes first, as it does after Docker
-  restarts. The role lets traffic from and to the pod range through it.
-- **`netfilter-persistent` saves k3s's rules**, which refer to ipsets that do not exist at boot, so
-  restoring them fails and takes the whole filter table, the firewall's rules included, with it. A
-  `netfilter-persistent` plugin takes them back out of `rules.v4` on every save; k3s writes them
-  again when it starts.
+  restarts. The role returns traffic from and to the pod range to the rest of `FORWARD`, where
+  network policy still applies.
+- **`netfilter-persistent` saves k3s's rules**, which refer to state that does not exist at boot,
+  so restoring them fails and takes the whole table, the firewall's rules included, with it. A
+  drop-in on `netfilter-persistent.service` strips them from `rules.v4` and `rules.v6` before each
+  restore; k3s writes them again when it starts.
 - **Flannel uses `host-gw`**, which opens no VXLAN port.
 - **User namespace remapping and `icc` are Docker's.** Pods get Pod Security Admission instead, at
   `k3s_pod_security_level`. Charts that need a hostPort, host namespaces or hostPath go in

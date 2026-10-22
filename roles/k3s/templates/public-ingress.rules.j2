@@ -1,11 +1,19 @@
-# New connections from the internet: the ports in firewall_allowed_ports and
-# firewall_allowed_udp_ports, ICMP and DHCP replies, and nothing else. Replies to connections the
-# host opened are established and pass.
+# New connections from the internet{{ ' over IPv6' if item.version == 'ipv6' else '' }}: to the host's own addresses, on the ports in
+# firewall_allowed_ports and firewall_allowed_udp_ports, plus ICMP and DHCP replies. Anything for
+# another address, such as the pod and Service ranges a neighbour on the same link could route to
+# the host, is dropped. Replies to connections the host opened are established and pass.
 *mangle
 :PUBLIC-INGRESS - [0:0]
 -A PUBLIC-INGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
--A PUBLIC-INGRESS -p icmp -j RETURN
+{% if item.version == 'ipv4' %}
 -A PUBLIC-INGRESS -p udp --sport 67 --dport 68 -j RETURN
+-A PUBLIC-INGRESS -m addrtype ! --dst-type LOCAL -j DROP
+-A PUBLIC-INGRESS -p icmp -j RETURN
+{% else %}
+-A PUBLIC-INGRESS -p ipv6-icmp -j RETURN
+-A PUBLIC-INGRESS -p udp --sport 547 --dport 546 -j RETURN
+-A PUBLIC-INGRESS -m addrtype ! --dst-type LOCAL -j DROP
+{% endif %}
 {% for port in firewall_allowed_ports | default([]) %}
 -A PUBLIC-INGRESS -p tcp --dport {{ port }} -j RETURN
 {% endfor %}

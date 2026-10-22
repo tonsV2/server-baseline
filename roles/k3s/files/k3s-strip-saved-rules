@@ -1,0 +1,13 @@
+#!/bin/sh
+# Run by netfilter-persistent before it restores the saved rules: removes the rules k3s, its CNI
+# plugins and flannel wrote, with the patterns k3s-killall.sh uses, since they refer to state that
+# does not exist at boot and would make the restore refuse the whole table.
+set -e
+
+for rules in /etc/iptables/rules.v4 /etc/iptables/rules.v6; do
+    [ -s "$rules" ] || continue
+    tmp=$(mktemp "$rules.XXXXXX")
+    grep --invert-match -e KUBE- -e CNI- "$rules" | grep --invert-match --ignore-case flannel > "$tmp" || true
+    chmod --reference="$rules" "$tmp"
+    mv "$tmp" "$rules"
+done

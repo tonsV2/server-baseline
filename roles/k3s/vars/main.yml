@@ -1,0 +1,8 @@
+# The public interface filter is applied once per address family.
+k3s_ip_families:
+  - version: ipv4
+    command: iptables
+    file: rules.v4
+  - version: ipv6
+    command: ip6tables
+    file: rules.v6
