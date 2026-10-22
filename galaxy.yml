@@ -1,6 +1,6 @@
 namespace: sre
 name: server
-version: 1.0.1
+version: 1.0.1-k3s.1
 readme: README.md
 license:
   - Apache-2.0
@@ -13,9 +13,9 @@ tags:
   - hardening
   - infrastructure
   - ubuntu
-repository: https://github.com/dhis2-sre/server-baseline
-documentation: https://github.com/dhis2-sre/server-baseline/blob/master/README.md
-issues: https://github.com/dhis2-sre/server-baseline/issues
+repository: https://github.com/tonsV2/server-baseline
+documentation: https://github.com/tonsV2/server-baseline/blob/master/README.md
+issues: https://github.com/tonsV2/server-baseline/issues
 
 # authorized_key, mount and sysctl are not in ansible-core. Installing the collection pulls this in,
 # which is what requirements.yml has to do by hand for consumers that put the roles on roles_path

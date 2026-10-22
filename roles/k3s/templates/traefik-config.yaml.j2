@@ -1,0 +1,22 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    service:
+      type: ClusterIP
+    # One node and a host port: the new pod cannot start while the old one holds the port, so the old
+    # one goes first.
+    updateStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxUnavailable: 1
+        maxSurge: 0
+    ports:
+      web:
+        expose:
+          default: false
+      websecure:
+        hostPort: {{ k3s_traefik_https_port }}

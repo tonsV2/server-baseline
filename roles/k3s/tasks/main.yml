@@ -1,0 +1,213 @@
+# A single node k3s server beside the Docker Engine bootstrap installs. k3s brings its own containerd
+# under /run/k3s, so the two runtimes do not share anything but the kernel's netfilter tables, which
+# is where the firewall tasks at the end come in.
+
+- name: Install the k3s binary
+  ansible.builtin.get_url:
+    url: "https://github.com/k3s-io/k3s/releases/download/{{ k3s_version | urlencode }}/k3s"
+    checksum: "sha256:https://github.com/k3s-io/k3s/releases/download/{{ k3s_version | urlencode }}/sha256sum-amd64.txt"
+    dest: /usr/local/bin/k3s
+    mode: '0755'
+  register: k3s_binary
+  notify: Restart k3s
+
+# Not ctr: containerd.io from bootstrap already installs one, for Docker's containerd.
+- name: Link kubectl and crictl to k3s
+  ansible.builtin.file:
+    src: /usr/local/bin/k3s
+    dest: "/usr/local/bin/{{ item }}"
+    state: link
+  loop:
+    - kubectl
+    - crictl
+  # Under --check a first install downloads nothing, so there is no binary to link to yet.
+  when: not (ansible_check_mode and k3s_binary is changed)
+
+- name: Create the k3s config directory
+  ansible.builtin.file:
+    path: /etc/rancher/k3s
+    state: directory
+    mode: '0755'
+
+- name: Configure Pod Security Admission
+  ansible.builtin.template:
+    src: pod-security.yaml.j2
+    dest: /etc/rancher/k3s/pod-security.yaml
+    mode: '0600'
+  notify: Restart k3s
+
+# host-gw rather than the default VXLAN: on one node there is nothing to tunnel to, and VXLAN would
+# listen on UDP 8472 without authentication.
+- name: Configure k3s
+  ansible.builtin.copy:
+    dest: /etc/rancher/k3s/config.yaml
+    content: "{{ k3s_config | to_nice_yaml(indent=2) }}"
+    mode: '0600'
+  vars:
+    k3s_config:
+      write-kubeconfig-mode: '0600'
+      cluster-cidr: "{{ k3s_cluster_cidr }}"
+      service-cidr: "{{ k3s_service_cidr }}"
+      flannel-backend: host-gw
+      disable: "{{ k3s_disable }}"
+      secrets-encryption: true
+      kube-apiserver-arg:
+        - admission-control-config-file=/etc/rancher/k3s/pod-security.yaml
+  notify: Restart k3s
+
+- name: Create the k3s manifests directory
+  ansible.builtin.file:
+    path: /var/lib/rancher/k3s/server/manifests
+    state: directory
+    mode: '0700'
+
+# k3s applies the files in this directory itself and keeps them applied.
+- name: Bind traefik's websecure entrypoint to a host port
+  ansible.builtin.template:
+    src: traefik-config.yaml.j2
+    dest: /var/lib/rancher/k3s/server/manifests/traefik-config.yaml
+    mode: '0600'
+  when: "'traefik' not in k3s_disable"
+
+- name: Remove the traefik host port config while traefik is disabled
+  ansible.builtin.file:
+    path: /var/lib/rancher/k3s/server/manifests/traefik-config.yaml
+    state: absent
+  when: "'traefik' in k3s_disable"
+
+- name: Install the k3s unit
+  ansible.builtin.template:
+    src: k3s.service.j2
+    dest: /etc/systemd/system/k3s.service
+    mode: '0644'
+  register: k3s_unit
+  notify: Restart k3s
+
+# Firewall
+#
+# The firewall role filters DOCKER-USER, which k3s gets around: its network policy controller
+# accepts every forwarded packet that no NetworkPolicy refuses, ahead of the jump to DOCKER-USER, so
+# a hostPort or NodePort would answer the internet whatever firewall_allowed_ports says. INPUT is
+# open as well (dhis2-sre/server-baseline#17), and the firewall role leaves IPv6 alone. So new
+# connections arriving on the public interface are filtered in mangle PREROUTING instead, for IPv4
+# and IPv6, after connection tracking and before any port is rewritten, where the firewall's port
+# lists decide what reaches host services, containers and pods alike.
+
+# netfilter-persistent saves every rule, k3s's among them, and k3s's refer to ipsets and accounting
+# objects that do not exist yet at boot. The restore then refuses the whole table, the firewall
+# role's rules with it. They are taken out of the saved files just before the restore, which also
+# covers a file saved by hand or cut short; k3s writes its rules again whenever it starts. Only the
+# next boot reads the drop-in, and the daemon reload when k3s is started below picks it up before
+# then.
+- name: Install the saved rules cleaner
+  ansible.builtin.copy:
+    src: k3s-strip-saved-rules
+    dest: /usr/local/sbin/k3s-strip-saved-rules
+    mode: '0755'
+
+- name: Create the netfilter-persistent drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/netfilter-persistent.service.d
+    state: directory
+    mode: '0755'
+
+- name: Clean the saved rules before netfilter-persistent restores them
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/netfilter-persistent.service.d/k3s-strip-saved-rules.conf
+    content: |
+      [Service]
+      ExecStartPre=/usr/local/sbin/k3s-strip-saved-rules
+    mode: '0644'
+
+- name: Assert the SSH port stays open
+  ansible.builtin.assert:
+    that: (ansible_port | default(22)) | int in firewall_allowed_ports | default([]) | map('int')
+    fail_msg: >-
+      The public interface filter drops every port not in firewall_allowed_ports, and port
+      {{ ansible_port | default(22) }}, which this play connects over, is not in it.
+
+- name: Write the public interface filter
+  ansible.builtin.template:
+    src: public-ingress.rules.j2
+    dest: "/etc/iptables/public-ingress.{{ item.file }}"
+    mode: '0600'
+  loop: "{{ k3s_ip_families }}"
+
+# Restoring a file replaces the chain's rules in one commit. Whether that changed anything is read
+# off the chain itself, so a chain lost or edited by hand is put back even when the file is
+# unchanged.
+- name: Apply the public interface filter
+  ansible.builtin.shell: |
+    set -euo pipefail
+    before=$({{ item.command }} --table mangle --list-rules PUBLIC-INGRESS 2>/dev/null || true)
+    {{ item.command }}-restore --noflush < /etc/iptables/public-ingress.{{ item.file }}
+    after=$({{ item.command }} --table mangle --list-rules PUBLIC-INGRESS)
+    [ "$before" = "$after" ] || echo changed
+  args:
+    executable: /bin/bash
+  loop: "{{ k3s_ip_families }}"
+  register: k3s_public_ingress
+  changed_when: "'changed' in k3s_public_ingress.stdout"
+  notify: Save iptables rules
+
+- name: Send the public interface through the filter
+  ansible.builtin.iptables:
+    table: mangle
+    chain: PREROUTING
+    in_interface: "{{ k3s_public_interface }}"
+    jump: PUBLIC-INGRESS
+    action: insert
+    comment: Filter new connections from the internet
+    ip_version: "{{ item.version }}"
+  loop: "{{ k3s_ip_families }}"
+  notify: Save iptables rules
+
+# Docker sends every forwarded packet through DOCKER-USER, not only its own containers', and the
+# firewall role ends that chain with a drop. When Docker has put its jump ahead of k3s's, as it does
+# when it restarts, pod traffic meets that drop: pods would lose DNS and the internet, and a host
+# port would not reach its pod. RETURN rather than ACCEPT, so the packet goes on through the rest of
+# FORWARD, where network policy still decides. The two rules have to stay first: the firewall role
+# inserts a newly listed port's ACCEPT at the top, which would accept pod traffic on that port ahead
+# of network policy, so they are moved back above it whenever they are not the first two.
+- name: Keep pod traffic going past the DOCKER-USER drop
+  ansible.builtin.shell: |
+    set -euo pipefail
+    iptables --numeric --list DOCKER-USER > /dev/null 2>&1 || exit 0
+    from=(--source {{ k3s_cluster_cidr }} --match comment --comment k3s-pods-out --jump RETURN)
+    to=(--destination {{ k3s_cluster_cidr }} --match comment --comment k3s-pods-in --jump RETURN)
+    first=$(iptables --list-rules DOCKER-USER | sed --quiet '2,3p')
+    if [ "$(grep --count --fixed-strings -e k3s-pods-out -e k3s-pods-in <<< "$first")" != 2 ]; then
+      while iptables --delete DOCKER-USER "${from[@]}" 2> /dev/null; do :; done
+      while iptables --delete DOCKER-USER "${to[@]}" 2> /dev/null; do :; done
+      iptables --insert DOCKER-USER 1 "${to[@]}"
+      iptables --insert DOCKER-USER 1 "${from[@]}"
+      echo changed
+    fi
+  args:
+    executable: /bin/bash
+  register: k3s_docker_user
+  changed_when: "'changed' in k3s_docker_user.stdout"
+  notify: Save iptables rules
+
+# Applies a changed binary, config or unit now, so the wait below sees the k3s that was asked for.
+- name: Restart k3s if anything about it changed
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start k3s
+  ansible.builtin.systemd_service:
+    name: k3s
+    state: started
+    enabled: true
+    daemon_reload: true
+  # Under --check a first install writes no unit, so there is no service to start yet.
+  when: not (ansible_check_mode and k3s_unit is changed)
+
+- name: Wait for the node to be ready
+  ansible.builtin.command: k3s kubectl wait node --all --for condition=Ready --timeout 10s
+  register: k3s_node_ready
+  until: k3s_node_ready.rc == 0
+  retries: 30
+  delay: 10
+  changed_when: false
+  # Under --check nothing above was installed or started.
+  when: not ansible_check_mode

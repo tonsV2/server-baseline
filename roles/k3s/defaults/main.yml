@@ -1,0 +1,26 @@
+# Defaults for the k3s role. Override per deployment in group_vars/all.yml.
+
+# A release from https://github.com/k3s-io/k3s/releases. The binary is checked against that release's
+# sha256sum-amd64.txt, and changing this restarts k3s on the new version.
+k3s_version: v1.36.5+k3s1
+
+k3s_cluster_cidr: 10.42.0.0/16
+k3s_service_cidr: 10.43.0.0/16
+
+# Packaged components k3s should not deploy. servicelb would open a host port for every Service of
+# type LoadBalancer; traefik takes 443 through a hostPort instead (see k3s_traefik_https_port).
+# Add traefik while something else, such as a compose stack, still holds 443.
+k3s_disable:
+  - servicelb
+
+# The host port traefik's websecure entrypoint binds when traefik is not disabled.
+k3s_traefik_https_port: 443
+
+# Pod Security Admission level enforced on every namespace but kube-system, standing in for the
+# user namespace remapping Docker containers get from harden: privileged, host namespace and
+# hostPath pods are refused. Audit and warn report what restricted would refuse.
+k3s_pod_security_level: baseline
+
+# The interface the internet reaches the host on. New connections arriving on it are dropped unless
+# they are for a port in firewall_allowed_ports or firewall_allowed_udp_ports.
+k3s_public_interface: "{{ ansible_facts['default_ipv4']['interface'] }}"

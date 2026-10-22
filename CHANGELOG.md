@@ -6,7 +6,10 @@ The collection follows [semantic versioning](https://semver.org). A breaking cha
 variables or to what it does to a host is a major version, so consumers pinning `v1.x` can take
 patches without rereading their group_vars.
 
-## Unreleased
+## 1.0.1-k3s.1
+
+The first release of the tonsV2 fork: upstream's unreleased fixes after 1.0.1, plus the k3s role.
+Fork releases are tagged `v<upstream version>-k3s.<n>`.
 
 ### Fixed
 
@@ -38,6 +41,12 @@ patches without rereading their group_vars.
 
 ### Added
 
+- `sre.server.k3s`, a single node k3s server beside Docker. It filters new connections on the public
+  interface, IPv4 and IPv6, to the host's own addresses on the firewall's listed ports, before any
+  port is rewritten, which k3s's network policy controller would otherwise get around; lets pod
+  traffic past the `DOCKER-USER` drop; keeps k3s's rules out of the restore at boot, which they
+  would otherwise make fail; and enforces Pod Security Admission. It is not part of
+  `sre.server.baseline`.
 - `harden_docker_daemon_config`, the path the Docker daemon settings are merged into. It defaults
   to `/etc/docker/daemon.json` and exists for the tests.
 - `tests/docker-daemon.yml`, run by `tests/run.sh`, which applies those tasks to a scratch file and
