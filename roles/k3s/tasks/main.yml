@@ -75,35 +75,6 @@
     state: absent
   when: "'traefik' in k3s_disable"
 
-# The TLSOption is traefik's own resource, so it only applies while traefik and its CRDs are there.
-- name: Require client certificates on traefik
-  ansible.builtin.template:
-    src: traefik-client-auth.yaml.j2
-    dest: /var/lib/rancher/k3s/server/manifests/traefik-client-auth.yaml
-    mode: '0600'
-  when:
-    - "'traefik' not in k3s_disable"
-    - k3s_traefik_client_ca | length > 0
-
-- name: Remove the client certificate requirement while it is off
-  ansible.builtin.file:
-    path: /var/lib/rancher/k3s/server/manifests/traefik-client-auth.yaml
-    state: absent
-  register: k3s_client_auth_manifest
-  when: "'traefik' in k3s_disable or k3s_traefik_client_ca | length == 0"
-
-# k3s leaves what a manifest created in place when the file goes, so the TLSOption would go on
-# refusing connections without a client certificate
-- name: Delete the client certificate requirement from the cluster
-  ansible.builtin.command: >-
-    k3s kubectl --namespace kube-system delete --ignore-not-found
-    tlsoption.traefik.io/default secret/traefik-client-ca
-  register: k3s_client_auth_deleted
-  changed_when: "'deleted' in k3s_client_auth_deleted.stdout"
-  when:
-    - k3s_client_auth_manifest is changed
-    - "'traefik' not in k3s_disable"
-
 - name: Install the k3s unit
   ansible.builtin.template:
     src: k3s.service.j2
@@ -240,3 +211,43 @@
   changed_when: false
   # Under --check nothing above was installed or started.
   when: not ansible_check_mode
+
+# Applied and deleted here rather than through the manifests directory, which keeps its own record
+# of what it applied and so neither removes the objects when the file goes nor applies the same file
+# again after they were deleted. Runs on every run, so a failed run is put right by the next. The
+# TLSOption is traefik's own resource, so it waits for traefik's CRDs, which arrive a little after
+# traefik is enabled.
+- name: Write the client certificate requirement
+  ansible.builtin.template:
+    src: traefik-client-auth.yaml.j2
+    dest: /etc/rancher/k3s/traefik-client-auth.yaml
+    mode: '0600'
+  when:
+    - "'traefik' not in k3s_disable"
+    - k3s_traefik_client_ca | length > 0
+
+- name: Require client certificates on traefik
+  ansible.builtin.command: k3s kubectl apply --filename /etc/rancher/k3s/traefik-client-auth.yaml
+  register: k3s_client_auth_applied
+  until: k3s_client_auth_applied.rc == 0
+  retries: 30
+  delay: 10
+  changed_when: "'configured' in k3s_client_auth_applied.stdout or 'created' in k3s_client_auth_applied.stdout"
+  when:
+    - "'traefik' not in k3s_disable"
+    - k3s_traefik_client_ca | length > 0
+    - not ansible_check_mode
+
+- name: Remove the client certificate requirement while it is off
+  ansible.builtin.command: >-
+    k3s kubectl --namespace kube-system delete --ignore-not-found
+    tlsoption.traefik.io/default secret/traefik-client-ca
+  register: k3s_client_auth_deleted
+  changed_when: "'deleted' in k3s_client_auth_deleted.stdout"
+  failed_when:
+    - k3s_client_auth_deleted.rc != 0
+    - "'have a resource type' not in k3s_client_auth_deleted.stderr"
+  when:
+    - "'traefik' not in k3s_disable"
+    - k3s_traefik_client_ca | length == 0
+    - not ansible_check_mode

@@ -7,9 +7,9 @@ metadata:
   name: traefik-client-ca
   namespace: kube-system
 type: Opaque
-stringData:
-  tls.ca: |
-    {{ k3s_traefik_client_ca | trim | indent(4) }}
+# data rather than stringData, which kubectl apply would report as changed on every run
+data:
+  tls.ca: {{ (k3s_traefik_client_ca | trim + '\n') | b64encode }}
 ---
 apiVersion: traefik.io/v1alpha1
 kind: TLSOption
