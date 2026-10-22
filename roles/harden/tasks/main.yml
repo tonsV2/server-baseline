@@ -103,11 +103,15 @@
     state: started
     enabled: true
 
+# Written to a file of their own under /etc/sysctl.d, which every systemd-sysctl reads at boot.
+# Ubuntu 26.04 no longer reads /etc/sysctl.conf, the module's default, so values written there were
+# applied once and lost at the next reboot.
 - name: Set kernel parameters for hardening
   ansible.posix.sysctl:
     name: "{{ item.key }}"
     value: "{{ item.value }}"
     state: present
+    sysctl_file: /etc/sysctl.d/99-sre-server.conf
   loop:
     # Enables TCP SYN cookies to help prevent SYN flood attacks
     - {key: "net.ipv4.tcp_syncookies", value: "1"}
