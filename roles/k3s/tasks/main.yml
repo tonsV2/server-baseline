@@ -166,29 +166,27 @@
 # firewall role ends that chain with a drop. When Docker has put its jump ahead of k3s's, as it does
 # when it restarts, pod traffic meets that drop: pods would lose DNS and the internet, and a host
 # port would not reach its pod. RETURN rather than ACCEPT, so the packet goes on through the rest of
-# FORWARD, where network policy still decides.
-- name: Check for the DOCKER-USER chain
-  ansible.builtin.command: iptables --numeric --list DOCKER-USER
-  register: k3s_docker_user_chain
-  failed_when: false
-  changed_when: false
-  check_mode: false
-
-- name: Let pod traffic past the DOCKER-USER drop
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    source: "{{ item.source | default(omit) }}"
-    destination: "{{ item.destination | default(omit) }}"
-    jump: RETURN
-    action: insert
-    comment: "{{ item.comment }}"
-    ip_version: ipv4
-  loop:
-    - source: "{{ k3s_cluster_cidr }}"
-      comment: Leave traffic from k3s pods to the rest of FORWARD
-    - destination: "{{ k3s_cluster_cidr }}"
-      comment: Leave traffic to k3s pods to the rest of FORWARD
-  when: k3s_docker_user_chain.rc == 0
+# FORWARD, where network policy still decides. The two rules have to stay first: the firewall role
+# inserts a newly listed port's ACCEPT at the top, which would accept pod traffic on that port ahead
+# of network policy, so they are moved back above it whenever they are not the first two.
+- name: Keep pod traffic going past the DOCKER-USER drop
+  ansible.builtin.shell: |
+    set -euo pipefail
+    iptables --numeric --list DOCKER-USER > /dev/null 2>&1 || exit 0
+    from=(--source {{ k3s_cluster_cidr }} --match comment --comment k3s-pods-out --jump RETURN)
+    to=(--destination {{ k3s_cluster_cidr }} --match comment --comment k3s-pods-in --jump RETURN)
+    first=$(iptables --list-rules DOCKER-USER | sed --quiet '2,3p')
+    if [ "$(grep --count --fixed-strings -e k3s-pods-out -e k3s-pods-in <<< "$first")" != 2 ]; then
+      while iptables --delete DOCKER-USER "${from[@]}" 2> /dev/null; do :; done
+      while iptables --delete DOCKER-USER "${to[@]}" 2> /dev/null; do :; done
+      iptables --insert DOCKER-USER 1 "${to[@]}"
+      iptables --insert DOCKER-USER 1 "${from[@]}"
+      echo changed
+    fi
+  args:
+    executable: /bin/bash
+  register: k3s_docker_user
+  changed_when: "'changed' in k3s_docker_user.stdout"
   notify: Save iptables rules
 
 # Applies a changed binary, config or unit now, so the wait below sees the k3s that was asked for.
