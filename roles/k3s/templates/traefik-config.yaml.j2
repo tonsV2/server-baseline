@@ -20,3 +20,9 @@ spec:
           default: false
       websecure:
         hostPort: {{ k3s_traefik_https_port }}
+{% if k3s_traefik_trusted_ips | length > 0 %}
+        # The X-Forwarded-* headers of connections from these addresses are kept, so what is behind
+        # traefik sees the client the proxy in front saw rather than the proxy
+        forwardedHeaders:
+          trustedIPs: {{ k3s_traefik_trusted_ips | to_json }}
+{% endif %}

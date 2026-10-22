@@ -6,6 +6,16 @@ The collection follows [semantic versioning](https://semver.org). A breaking cha
 variables or to what it does to a host is a major version, so consumers pinning `v1.x` can take
 patches without rereading their group_vars.
 
+## 1.0.1-k3s.2
+
+### Added
+
+- `k3s_traefik_trusted_ips`: addresses whose `X-Forwarded-*` headers traefik keeps on websecure, so
+  what is behind it sees the client a proxy in front saw, such as Cloudflare's ranges.
+- `k3s_traefik_client_ca`: a CA traefik requires every TLS client certificate to be signed by,
+  through a default `TLSOption`, so only a proxy holding one, such as Cloudflare with Authenticated
+  Origin Pulls, reaches anything behind it. Unsetting it deletes the requirement from the cluster.
+
 ## 1.0.1-k3s.1
 
 The first release of the tonsV2 fork: upstream's unreleased fixes after 1.0.1, plus the k3s role.

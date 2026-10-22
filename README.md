@@ -117,6 +117,8 @@ Every variable has a default. Override in `group_vars/all.yml`.
 | `k3s_cluster_cidr`, `k3s_service_cidr` | `10.42.0.0/16`, `10.43.0.0/16` | k3s | Pod and Service ranges |
 | `k3s_disable` | `[ servicelb ]` | k3s | Packaged components not to deploy. Add `traefik` while something else holds 443 |
 | `k3s_traefik_https_port` | `443` | k3s | Host port traefik's websecure entrypoint binds |
+| `k3s_traefik_trusted_ips` | `[ ]` | k3s | Addresses whose `X-Forwarded-*` headers traefik keeps, such as a proxy in front |
+| `k3s_traefik_client_ca` | `""` | k3s | PEM CA every TLS client certificate must be signed by; unset, none is asked for |
 | `k3s_pod_security_level` | `baseline` | k3s | Pod Security Admission level enforced outside `kube-system` |
 | `k3s_public_interface` | default route's interface | k3s | New connections arriving here are dropped unless their port is in the firewall's lists |
 
